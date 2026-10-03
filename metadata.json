@@ -1,0 +1,6 @@
+{
+  "name": "RideVision",
+  "description": "CV-based pothole detection, proactive 250m road hazard warnings, and civic complaint dispatch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
