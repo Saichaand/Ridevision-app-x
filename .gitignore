@@ -1,0 +1,5 @@
+.env
+*-debug.log
+.gradle/
+build/
+app/build/

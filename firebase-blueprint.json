@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "user": {
+      "title": "user",
+      "description": "Authenticated user profile and road sentinel telemetry record",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique Firebase Authentication UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User full display name"
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "User avatar profile image URL"
+        },
+        "safetyTier": {
+          "type": "string",
+          "description": "Safety tier badge (e.g. Gold Guardian, Silver Scout)"
+        },
+        "verifiedCount": {
+          "type": "integer",
+          "description": "Total number of confirmed hazards reported"
+        },
+        "milesCovered": {
+          "type": "string",
+          "description": "Distance covered during scouting trips"
+        },
+        "precisionScore": {
+          "type": "string",
+          "description": "AI optical verification precision percentage"
+        },
+        "vehicleModel": {
+          "type": "string",
+          "description": "Registered commuter vehicle model"
+        },
+        "emergencyIce": {
+          "type": "string",
+          "description": "In case of emergency contact details"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when account was first initialized"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last profile update"
+        }
+      },
+      "required": ["userId", "email", "displayName", "safetyTier", "verifiedCount"]
+    },
+    "pothole": {
+      "title": "pothole",
+      "description": "Road hazard and pothole incident logged by road sentinels",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of rider who submitted report"
+        },
+        "ticketNumber": {
+          "type": "string",
+          "description": "Public civil grievance ticket identifier"
+        },
+        "lat": {
+          "type": "number",
+          "description": "WGS84 Latitude coordinate"
+        },
+        "lon": {
+          "type": "number",
+          "description": "WGS84 Longitude coordinate"
+        },
+        "city": {
+          "type": "string",
+          "description": "City or municipality name"
+        },
+        "address": {
+          "type": "string",
+          "description": "Street name or highway corridor milestone"
+        },
+        "laneInfo": {
+          "type": "string",
+          "description": "Lane position and road orientation"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["MINOR", "MODERATE", "SEVERE"],
+          "description": "Calculated hazard severity"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "IN_PROGRESS", "VERIFIED_FIXED"],
+          "description": "Municipal lifecycle state"
+        },
+        "confirmationCount": {
+          "type": "integer",
+          "description": "Count of rider telemetry confirmations"
+        },
+        "fixedConfirmationCount": {
+          "type": "integer",
+          "description": "Count of rider verified repair confirmations"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Description of road fracture or defect"
+        },
+        "depthCm": {
+          "type": "number",
+          "description": "Estimated crater depth in centimeters"
+        },
+        "widthCm": {
+          "type": "number",
+          "description": "Estimated cavity width in centimeters"
+        },
+        "statusNote": {
+          "type": "string",
+          "description": "Civil administration status dispatch note"
+        },
+        "reportedAt": {
+          "type": "string",
+          "description": "Human readable date label"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last modification"
+        }
+      },
+      "required": ["id", "userId", "lat", "lon", "address", "severity", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/user"
+      },
+      "description": "User profile documentation, credentials, and telemetry achievements"
+    },
+    "/potholes/{potholeId}": {
+      "schema": {
+        "$ref": "#/entities/pothole"
+      },
+      "description": "Decentralized civic pothole registry shared across all community riders"
+    }
+  }
+}

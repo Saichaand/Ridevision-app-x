@@ -1,13 +1,25 @@
 package com.ridevision.app.data.repository
 
+import android.content.Context
+import android.util.Log
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.ridevision.app.R
 import com.ridevision.app.data.model.Pothole
 import com.ridevision.app.data.model.PotholeStatus
 import com.ridevision.app.data.model.Severity
+import com.ridevision.app.data.model.UserProfile
 import com.ridevision.app.domain.geo.GeoMatchingService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,23 +35,139 @@ sealed class VoteResult {
     data class CooldownActive(val message: String) : VoteResult()
 }
 
-class PotholeRepository {
+class PotholeRepository(private val db: FirebaseFirestore) {
+
+    // Secondary constructor to resolve database ID from string resources
+    constructor(context: Context) : this(
+        FirebaseFirestore.getInstance(
+            context.applicationContext.getString(R.string.firestore_database_id)
+        )
+    )
 
     private val userVoteHistory = mutableMapOf<String, Long>()
+    private var potholesListener: ListenerRegistration? = null
+    private var userProfileListener: ListenerRegistration? = null
 
-    private val _potholes = MutableStateFlow<List<Pothole>>(createInitialSeedData())
+    private val _potholes = MutableStateFlow<List<Pothole>>(emptyList())
     val potholes: StateFlow<List<Pothole>> = _potholes.asStateFlow()
+
+    private val _currentUserProfile = MutableStateFlow<UserProfile?>(null)
+    val currentUserProfile: StateFlow<UserProfile?> = _currentUserProfile.asStateFlow()
+
+    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+
+    init {
+        startListeningToPotholes()
+    }
 
     private fun getNowIso(): String {
         return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
     }
 
-    private fun createInitialSeedData(): List<Pothole> {
-        val now = getNowIso()
-        return listOf(
-            // 1. Critical Pending Report from screenshot
+    private fun getTodayFormatted(): String {
+        return SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date())
+    }
+
+    /**
+     * Real-time Firestore snapshot listener for the shared /potholes collection.
+     * Replaces hardcoded in-memory dummy data with live cloud-synchronized data.
+     */
+    fun startListeningToPotholes() {
+        if (potholesListener != null) return
+
+        val collectionRef = db.collection("potholes")
+        potholesListener = collectionRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e(TAG, "Error listening to Firestore /potholes: ${error.message}", error)
+                return@addSnapshotListener
+            }
+
+            if (snapshot != null) {
+                if (snapshot.isEmpty) {
+                    // Seed initial cloud records once if collection is completely fresh
+                    coroutineScope.launch {
+                        seedInitialCloudPotholes()
+                    }
+                } else {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.getString("id") ?: doc.id
+                            val userId = doc.getString("userId") ?: ""
+                            val ticketNumber = doc.getString("ticketNumber") ?: "#RV-88219"
+                            val lat = doc.getDouble("lat") ?: 12.9141
+                            val lon = doc.getDouble("lon") ?: 74.8560
+                            val city = doc.getString("city") ?: "Mangaluru"
+                            val address = doc.getString("address") ?: "NH 73 near SJEC Gate"
+                            val laneInfo = doc.getString("laneInfo") ?: "Lane 1"
+                            val severityStr = doc.getString("severity") ?: "MODERATE"
+                            val severity = try {
+                                Severity.valueOf(severityStr)
+                            } catch (e: Exception) {
+                                Severity.MODERATE
+                            }
+                            val statusStr = doc.getString("status") ?: "ACTIVE"
+                            val status = try {
+                                PotholeStatus.valueOf(statusStr)
+                            } catch (e: Exception) {
+                                PotholeStatus.ACTIVE
+                            }
+                            val confirmationCount = (doc.getLong("confirmationCount") ?: 1L).toInt()
+                            val fixedConfirmationCount = (doc.getLong("fixedConfirmationCount") ?: 0L).toInt()
+                            val notes = doc.getString("notes") ?: ""
+                            val depthCm = (doc.getDouble("depthCm") ?: 14.0).toFloat()
+                            val widthCm = (doc.getDouble("widthCm") ?: 45.0).toFloat()
+                            val statusNote = doc.getString("statusNote") ?: "Under Investigation by City Works"
+                            val reportedAt = doc.getString("reportedAt") ?: "Recently"
+                            val createdAt = doc.getTimestamp("createdAt")
+                            val updatedAt = doc.getTimestamp("updatedAt")
+
+                            Pothole(
+                                id = id,
+                                userId = userId,
+                                ticketNumber = ticketNumber,
+                                lat = lat,
+                                lon = lon,
+                                city = city,
+                                address = address,
+                                laneInfo = laneInfo,
+                                severity = severity,
+                                status = status,
+                                confirmationCount = confirmationCount,
+                                fixedConfirmationCount = fixedConfirmationCount,
+                                drawableResId = if (severity == Severity.SEVERE) R.drawable.sample_severe_pothole else R.drawable.sample_moderate_pothole,
+                                reportedAt = reportedAt,
+                                updatedAtDisplay = "Synced from Cloud",
+                                notes = notes,
+                                depthCm = depthCm,
+                                widthCm = widthCm,
+                                distanceDisplay = "0.4 km away",
+                                statusNote = statusNote,
+                                createdAt = createdAt,
+                                updatedAt = updatedAt
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error mapping pothole doc ${doc.id}", e)
+                            null
+                        }
+                    }
+                    _potholes.value = list
+                }
+            }
+        }
+    }
+
+    /**
+     * Seeds initial baseline road hazards into Firestore if cloud collection is empty.
+     */
+    private suspend fun seedInitialCloudPotholes() {
+        val auth = FirebaseAuth.getInstance()
+        val currentUid = auth.currentUser?.uid ?: "system-sentinel"
+        val now = getTodayFormatted()
+
+        val seedList = listOf(
             Pothole(
-                id = "pothole-88219",
+                id = "pothole-mng-001",
+                userId = currentUid,
                 ticketNumber = "#RV-88219",
                 lat = 12.9152,
                 lon = 74.8988,
@@ -50,17 +178,14 @@ class PotholeRepository {
                 status = PotholeStatus.ACTIVE,
                 confirmationCount = 24,
                 fixedConfirmationCount = 0,
-                drawableResId = R.drawable.sample_severe_pothole,
-                reportedAt = "Oct 22, 2024",
-                updatedAt = now,
-                notes = "Deep asphalt fissure road hazard with jagged rim and water pooled inside outside SJEC entrance.",
+                reportedAt = now,
+                notes = "Deep asphalt fissure road hazard with jagged rim outside SJEC entrance.",
                 depthCm = 14.2f,
-                distanceDisplay = "0.4 km away",
                 statusNote = "Under Investigation by City Works"
             ),
-            // 2. Moderate In-Progress Report from screenshot
             Pothole(
-                id = "pothole-77402",
+                id = "pothole-mng-002",
+                userId = currentUid,
                 ticketNumber = "#RV-77402",
                 lat = 12.8715,
                 lon = 74.8564,
@@ -70,340 +195,55 @@ class PotholeRepository {
                 severity = Severity.MODERATE,
                 status = PotholeStatus.IN_PROGRESS,
                 confirmationCount = 41,
-                fixedConfirmationCount = 2,
-                drawableResId = R.drawable.sample_moderate_pothole,
-                reportedAt = "Oct 19, 2024",
-                updatedAt = now,
-                notes = "Roadway cavern and circular depression on avenue marked by amber spray paint.",
+                fixedConfirmationCount = 1,
+                reportedAt = now,
+                notes = "Circular road depression marked with amber warning.",
                 depthCm = 8.5f,
-                distanceDisplay = "1.8 km away",
-                statusNote = "Scheduled for Patching • Nov 02"
+                statusNote = "Scheduled for Patching"
             ),
-            // 3. Repaired & Verified Report from screenshot
             Pothole(
-                id = "pothole-69120",
+                id = "pothole-mng-003",
+                userId = currentUid,
                 ticketNumber = "#RV-69120",
                 lat = 12.8798,
                 lon = 74.8532,
                 city = "Mangaluru",
                 address = "Kadri Temple Road, Mallikatte Junction",
-                laneInfo = "Verified by 89 Telemetry Sweeps",
+                laneInfo = "Crosswalk approach",
                 severity = Severity.MINOR,
                 status = PotholeStatus.VERIFIED_FIXED,
                 confirmationCount = 89,
                 fixedConfirmationCount = 14,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 14, 2024",
-                updatedAt = now,
-                notes = "Freshly paved smooth bitumen asphalt patch over previously fractured roadway.",
+                reportedAt = now,
+                notes = "Bitumen asphalt patch completed and verified smooth.",
                 depthCm = 0.0f,
-                distanceDisplay = "3.1 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            // Additional In-Progress & Repaired cases to reach 18 total (12 repaired, 5 progress, 1 critical)
-            Pothole(
-                id = "pothole-77403",
-                ticketNumber = "#RV-77301",
-                lat = 12.8682,
-                lon = 74.8427,
-                city = "Mangaluru",
-                address = "Hampankatta Circle near City Bus Stand",
-                laneInfo = "Lane 1 Center Track",
-                severity = Severity.MODERATE,
-                status = PotholeStatus.IN_PROGRESS,
-                confirmationCount = 32,
-                fixedConfirmationCount = 1,
-                drawableResId = R.drawable.sample_moderate_pothole,
-                reportedAt = "Oct 17, 2024",
-                updatedAt = now,
-                notes = "Edge erosion along bus lane corridor.",
-                depthCm = 7.0f,
-                distanceDisplay = "0.9 km away",
-                statusNote = "Assigned to Municipal Rapid Patch Unit"
-            ),
-            Pothole(
-                id = "pothole-77404",
-                ticketNumber = "#RV-77119",
-                lat = 12.8615,
-                lon = 74.8650,
-                city = "Mangaluru",
-                address = "Pumpwell Flyover Service Road",
-                laneInfo = "Right Turn Ingress Lane",
-                severity = Severity.MODERATE,
-                status = PotholeStatus.IN_PROGRESS,
-                confirmationCount = 19,
-                fixedConfirmationCount = 1,
-                drawableResId = R.drawable.sample_moderate_pothole,
-                reportedAt = "Oct 16, 2024",
-                updatedAt = now,
-                notes = "Cracked manhole transition depression.",
-                depthCm = 6.2f,
-                distanceDisplay = "1.2 km away",
-                statusNote = "Scheduled for Patching • Oct 30"
-            ),
-            Pothole(
-                id = "pothole-77405",
-                ticketNumber = "#RV-76890",
-                lat = 12.8835,
-                lon = 74.8465,
-                city = "Mangaluru",
-                address = "Bejai Main Road near KSRTC Bus Stand",
-                laneInfo = "Bicycle Buffer Lane",
-                severity = Severity.MODERATE,
-                status = PotholeStatus.IN_PROGRESS,
-                confirmationCount = 27,
-                fixedConfirmationCount = 2,
-                drawableResId = R.drawable.sample_moderate_pothole,
-                reportedAt = "Oct 15, 2024",
-                updatedAt = now,
-                notes = "Drainage grating asphalt cavity.",
-                depthCm = 7.8f,
-                distanceDisplay = "2.1 km away",
-                statusNote = "Work Order Created by Public Works"
-            ),
-            Pothole(
-                id = "pothole-77406",
-                ticketNumber = "#RV-76722",
-                lat = 12.8740,
-                lon = 74.8480,
-                city = "Mangaluru",
-                address = "Bunts Hostel Circle towards Karangalpady",
-                laneInfo = "Crosswalk approach",
-                severity = Severity.MODERATE,
-                status = PotholeStatus.IN_PROGRESS,
-                confirmationCount = 18,
-                fixedConfirmationCount = 1,
-                drawableResId = R.drawable.sample_moderate_pothole,
-                reportedAt = "Oct 13, 2024",
-                updatedAt = now,
-                notes = "Subsurface aggregate degradation.",
-                depthCm = 8.1f,
-                distanceDisplay = "2.7 km away",
-                statusNote = "Scheduled for Patching • Nov 05"
-            ),
-            // Repaired items (completing 12 repaired)
-            Pothole(
-                id = "pothole-69121",
-                ticketNumber = "#RV-69001",
-                lat = 12.8810,
-                lon = 74.8390,
-                city = "Mangaluru",
-                address = "Lalbagh Junction towards Ladyhill",
-                laneInfo = "Dual Lane Centerline",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 64,
-                fixedConfirmationCount = 12,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 10, 2024",
-                updatedAt = now,
-                notes = "Hot asphalt inlay completed.",
-                distanceDisplay = "3.4 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69122",
-                ticketNumber = "#RV-68950",
-                lat = 12.8870,
-                lon = 74.8320,
-                city = "Mangaluru",
-                address = "Urwa Market Road near Marigudi",
-                laneInfo = "Market approach",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 78,
-                fixedConfirmationCount = 15,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 08, 2024",
-                updatedAt = now,
-                notes = "Pavement leveled and sealed.",
-                distanceDisplay = "3.8 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69123",
-                ticketNumber = "#RV-68810",
-                lat = 12.8850,
-                lon = 74.8290,
-                city = "Mangaluru",
-                address = "Mannagudda Gurji Junction",
-                laneInfo = "Junction Approach",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 52,
-                fixedConfirmationCount = 9,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 05, 2024",
-                updatedAt = now,
-                notes = "Structural seal applied.",
-                distanceDisplay = "4.1 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69124",
-                ticketNumber = "#RV-68700",
-                lat = 12.8710,
-                lon = 74.8380,
-                city = "Mangaluru",
-                address = "Car Street near Venkataramana Temple",
-                laneInfo = "Temple Square Curb",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 71,
-                fixedConfirmationCount = 11,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 03, 2024",
-                updatedAt = now,
-                notes = "Deep patch repair verified smooth.",
-                distanceDisplay = "4.5 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69125",
-                ticketNumber = "#RV-68620",
-                lat = 12.8670,
-                lon = 74.8520,
-                city = "Mangaluru",
-                address = "Falnir Road near Highland Hospital",
-                laneInfo = "Hospital Ingress Apron",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 60,
-                fixedConfirmationCount = 10,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Oct 01, 2024",
-                updatedAt = now,
-                notes = "Full road resurfacing completed.",
-                distanceDisplay = "4.9 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69126",
-                ticketNumber = "#RV-68500",
-                lat = 12.8730,
-                lon = 74.8580,
-                city = "Mangaluru",
-                address = "Bendoorwell Junction towards St. Agnes",
-                laneInfo = "College Corridor Edge",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 43,
-                fixedConfirmationCount = 8,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 28, 2024",
-                updatedAt = now,
-                notes = "Thermoplastic marked and leveled.",
-                distanceDisplay = "5.2 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69127",
-                ticketNumber = "#RV-68420",
-                lat = 12.8760,
-                lon = 74.8680,
-                city = "Mangaluru",
-                address = "Nanthoor Circle Merge Corridor",
-                laneInfo = "High-speed descent lane",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 95,
-                fixedConfirmationCount = 18,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 25, 2024",
-                updatedAt = now,
-                notes = "Emergency patch completed within 48h.",
-                distanceDisplay = "5.6 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69128",
-                ticketNumber = "#RV-68310",
-                lat = 12.8840,
-                lon = 74.8720,
-                city = "Mangaluru",
-                address = "Bikarnakatte Twin Flyover Approach",
-                laneInfo = "T-junction merge",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 57,
-                fixedConfirmationCount = 10,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 22, 2024",
-                updatedAt = now,
-                notes = "Road crew asphalt fill verified.",
-                distanceDisplay = "6.1 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69129",
-                ticketNumber = "#RV-68200",
-                lat = 12.8630,
-                lon = 74.8810,
-                city = "Mangaluru",
-                address = "Padil Junction towards Mangaluru Junction",
-                laneInfo = "Right lane median edge",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 81,
-                fixedConfirmationCount = 14,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 20, 2024",
-                updatedAt = now,
-                notes = "Cold mix replaced with permanent bitumen.",
-                distanceDisplay = "6.5 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69130",
-                ticketNumber = "#RV-68110",
-                lat = 12.9280,
-                lon = 74.9250,
-                city = "Mangaluru",
-                address = "Gurupura River Bridge Approach",
-                laneInfo = "Bridge crossover",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 68,
-                fixedConfirmationCount = 11,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 18, 2024",
-                updatedAt = now,
-                notes = "Re-graded and verified smooth.",
-                distanceDisplay = "7.0 km away",
-                statusNote = "Resolved & Verified by Riders"
-            ),
-            Pothole(
-                id = "pothole-69131",
-                ticketNumber = "#RV-68005",
-                lat = 12.9020,
-                lon = 74.8350,
-                city = "Mangaluru",
-                address = "Kottara Chowki Flyover Underpass",
-                laneInfo = "Northbound Highway Lane",
-                severity = Severity.MINOR,
-                status = PotholeStatus.VERIFIED_FIXED,
-                confirmationCount = 110,
-                fixedConfirmationCount = 22,
-                drawableResId = R.drawable.sample_clean_road,
-                reportedAt = "Sep 15, 2024",
-                updatedAt = now,
-                notes = "Highway underpass drainage damage repaired.",
-                distanceDisplay = "7.5 km away",
                 statusNote = "Resolved & Verified by Riders"
             )
         )
+
+        for (p in seedList) {
+            try {
+                db.collection("potholes").document(p.id).set(p.toFirestoreMap()).await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error seeding initial pothole ${p.id}", e)
+            }
+        }
     }
 
-    fun submitReport(
+    /**
+     * Submits a real pothole report directly to Cloud Firestore.
+     * Enforces spatial 15m deduplication.
+     */
+    suspend fun submitReport(
         lat: Double,
         lon: Double,
         address: String,
         severity: Severity,
-        notes: String,
-        drawableResId: Int? = null
+        notes: String
     ): ReportResult {
+        val auth = FirebaseAuth.getInstance()
+        val userId = auth.currentUser?.uid ?: error("User must be authenticated to report a pothole.")
         val currentList = _potholes.value
-        val now = getNowIso()
 
         val nearbyExisting = currentList.firstOrNull {
             GeoMatchingService.haversineDistanceM(lat, lon, it.lat, it.lon) <= 15.0
@@ -411,41 +251,57 @@ class PotholeRepository {
 
         return if (nearbyExisting != null) {
             val dist = GeoMatchingService.haversineDistanceM(lat, lon, nearbyExisting.lat, nearbyExisting.lon).toInt()
+            try {
+                db.collection("potholes").document(nearbyExisting.id).update(
+                    "confirmationCount", FieldValue.increment(1),
+                    "updatedAt", FieldValue.serverTimestamp()
+                ).await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed updating existing pothole in Firestore", e)
+            }
             val updated = nearbyExisting.copy(
-                confirmationCount = nearbyExisting.confirmationCount + 1,
-                updatedAt = now,
-                severity = if (severity == Severity.SEVERE) Severity.SEVERE else nearbyExisting.severity
+                confirmationCount = nearbyExisting.confirmationCount + 1
             )
-            _potholes.value = currentList.map { if (it.id == updated.id) updated else it }
             ReportResult.MergedExisting(updated, dist)
         } else {
-            val randomTicket = "#RV-${(88220..88999).random()}"
+            val potholeId = "pothole-${UUID.randomUUID().toString().take(8)}"
+            val ticketNumber = "#RV-${(88220..88999).random()}"
+            val city = GeoMatchingService.detectCity(lat, lon)
+            val todayStr = getTodayFormatted()
+
             val newPothole = Pothole(
-                id = "pothole-${UUID.randomUUID().toString().take(8)}",
-                ticketNumber = randomTicket,
+                id = potholeId,
+                userId = userId,
+                ticketNumber = ticketNumber,
                 lat = lat,
                 lon = lon,
-                city = GeoMatchingService.detectCity(lat, lon),
+                city = city,
                 address = address.ifBlank { "NH 73 near SJEC Gate, Vamanjoor" },
                 laneInfo = "Lane 1, Center Track",
                 severity = severity,
                 status = PotholeStatus.ACTIVE,
                 confirmationCount = 1,
                 fixedConfirmationCount = 0,
-                drawableResId = drawableResId ?: R.drawable.sample_severe_pothole,
-                reportedAt = "Oct 24, 2024",
-                updatedAt = now,
-                notes = notes,
-                depthCm = 14.2f,
-                distanceDisplay = "0.1 mi away",
+                reportedAt = todayStr,
+                updatedAtDisplay = "Just now",
+                notes = notes.ifBlank { "Road cavity reported via optical AI telemetry." },
+                depthCm = if (severity == Severity.SEVERE) 14.2f else 7.5f,
                 statusNote = "Under Investigation by City Works"
             )
-            _potholes.value = listOf(newPothole) + currentList
+
+            try {
+                db.collection("potholes").document(potholeId).set(newPothole.toFirestoreMap()).await()
+                // Increment user's verifiedCount on successful report
+                incrementUserVerifiedCount(userId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed writing new pothole to Firestore", e)
+            }
+
             ReportResult.Created(newPothole)
         }
     }
 
-    fun confirmStillThere(potholeId: String, userId: String = "commuter-user-1"): VoteResult {
+    suspend fun confirmStillThere(potholeId: String, userId: String): VoteResult {
         val key = "$userId-$potholeId"
         val lastVote = userVoteHistory[key]
         val nowMs = System.currentTimeMillis()
@@ -459,15 +315,21 @@ class PotholeRepository {
             ?: return VoteResult.CooldownActive("Hazard not found.")
 
         userVoteHistory[key] = nowMs
-        val updated = target.copy(
-            confirmationCount = target.confirmationCount + 1,
-            updatedAt = getNowIso()
-        )
-        _potholes.value = _potholes.value.map { if (it.id == potholeId) updated else it }
-        return VoteResult.Success(updated, "Verified! +1 confirmation recorded for road authorities.")
+        try {
+            db.collection("potholes").document(potholeId).update(
+                "confirmationCount", FieldValue.increment(1),
+                "updatedAt", FieldValue.serverTimestamp()
+            ).await()
+            incrementUserVerifiedCount(userId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed confirming still there on Firestore", e)
+        }
+
+        val updated = target.copy(confirmationCount = target.confirmationCount + 1)
+        return VoteResult.Success(updated, "Verified! +1 confirmation recorded in Firestore for road authorities.")
     }
 
-    fun confirmFixed(potholeId: String, userId: String = "commuter-user-1"): VoteResult {
+    suspend fun confirmFixed(potholeId: String, userId: String): VoteResult {
         val key = "$userId-fix-$potholeId"
         val lastVote = userVoteHistory[key]
         val nowMs = System.currentTimeMillis()
@@ -488,12 +350,82 @@ class PotholeRepository {
             PotholeStatus.IN_PROGRESS
         }
 
+        try {
+            db.collection("potholes").document(potholeId).update(
+                "fixedConfirmationCount", FieldValue.increment(1),
+                "status", newStatus.name,
+                "statusNote", if (newStatus == PotholeStatus.VERIFIED_FIXED) "Resolved & Verified by Riders" else "Scheduled for Patching",
+                "updatedAt", FieldValue.serverTimestamp()
+            ).await()
+            incrementUserVerifiedCount(userId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed confirming fixed on Firestore", e)
+        }
+
         val updated = target.copy(
             fixedConfirmationCount = newFixedCount,
-            status = newStatus,
-            updatedAt = getNowIso()
+            status = newStatus
         )
-        _potholes.value = _potholes.value.map { if (it.id == potholeId) updated else it }
-        return VoteResult.Success(updated, "Repair vote logged ($newFixedCount/3).")
+        return VoteResult.Success(updated, "Repair vote logged ($newFixedCount/3) in Cloud Firestore.")
+    }
+
+    /**
+     * Listens to the authenticated user's profile at /users/{userId}.
+     */
+    fun startListeningToUserProfile(userId: String) {
+        userProfileListener?.remove()
+        userProfileListener = db.collection("users").document(userId).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e(TAG, "Error listening to user profile: ${error.message}", error)
+                return@addSnapshotListener
+            }
+
+            if (snapshot != null && snapshot.exists()) {
+                val profile = UserProfile(
+                    userId = userId,
+                    email = snapshot.getString("email") ?: "",
+                    displayName = snapshot.getString("displayName") ?: "Road Sentinel",
+                    photoUrl = snapshot.getString("photoUrl") ?: "",
+                    safetyTier = snapshot.getString("safetyTier") ?: "Gold Guardian",
+                    verifiedCount = (snapshot.getLong("verifiedCount") ?: 1L).toInt(),
+                    milesCovered = snapshot.getString("milesCovered") ?: "12.4 km",
+                    precisionScore = snapshot.getString("precisionScore") ?: "99.4%",
+                    vehicleModel = snapshot.getString("vehicleModel") ?: "Yamaha MT-07",
+                    emergencyIce = snapshot.getString("emergencyIce") ?: "Priya Vance (+91 98450 88219)",
+                    createdAt = snapshot.getTimestamp("createdAt"),
+                    updatedAt = snapshot.getTimestamp("updatedAt")
+                )
+                _currentUserProfile.value = profile
+            }
+        }
+    }
+
+    suspend fun saveUserProfile(profile: UserProfile) {
+        try {
+            db.collection("users").document(profile.userId).set(profile.toFirestoreMap()).await()
+            _currentUserProfile.value = profile
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed saving user profile to Firestore", e)
+        }
+    }
+
+    private suspend fun incrementUserVerifiedCount(userId: String) {
+        try {
+            db.collection("users").document(userId).update(
+                "verifiedCount", FieldValue.increment(1),
+                "updatedAt", FieldValue.serverTimestamp()
+            ).await()
+        } catch (e: Exception) {
+            // Document might not exist yet; will be created on profile sync
+        }
+    }
+
+    fun cleanup() {
+        potholesListener?.remove()
+        userProfileListener?.remove()
+    }
+
+    companion object {
+        private const val TAG = "PotholeRepository"
     }
 }

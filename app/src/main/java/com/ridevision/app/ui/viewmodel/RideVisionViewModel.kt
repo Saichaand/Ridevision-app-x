@@ -5,34 +5,45 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.firestore.FirebaseFirestore
 import com.ridevision.app.R
 import com.ridevision.app.data.model.DetectionResult
 import com.ridevision.app.data.model.HazardWarning
 import com.ridevision.app.data.model.Pothole
 import com.ridevision.app.data.model.PotholeStatus
+import com.ridevision.app.data.model.RouteGroundingIntel
 import com.ridevision.app.data.model.SafeRouteOption
 import com.ridevision.app.data.model.Severity
 import com.ridevision.app.data.model.UserProfile
+import com.ridevision.app.data.remote.GeminiMapsGroundingService
 import com.ridevision.app.data.repository.PotholeRepository
 import com.ridevision.app.data.repository.ReportResult
 import com.ridevision.app.data.repository.VoteResult
 import com.ridevision.app.domain.detector.RoadHazardDetector
 import com.ridevision.app.domain.geo.GeoMatchingService
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+private const val TAG = "RideVisionViewModel"
 
 enum class AppTab(val label: String) {
     REPORT("Report"),
@@ -48,9 +59,32 @@ enum class TransportMode(val label: String) {
 }
 
 class RideVisionViewModel(
-    private val repository: PotholeRepository = PotholeRepository()
+    private val repository: PotholeRepository
 ) : ViewModel() {
 
+    // Auth State (Single source of truth)
+    private val auth = FirebaseAuth.getInstance()
+    private val _currentUser = MutableStateFlow<FirebaseUser?>(auth.currentUser)
+    val currentUser: StateFlow<FirebaseUser?> = _currentUser.asStateFlow()
+
+    private val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val user = firebaseAuth.currentUser
+        _currentUser.value = user
+        if (user != null) {
+            repository.startListeningToUserProfile(user.uid)
+            syncFirebaseUserToProfile(user)
+        }
+    }
+
+    init {
+        auth.addAuthStateListener(authListener)
+        auth.currentUser?.let { user ->
+            repository.startListeningToUserProfile(user.uid)
+            syncFirebaseUserToProfile(user)
+        }
+    }
+
+    // Live Cloud Firestore Potholes Stream
     val potholes: StateFlow<List<Pothole>> = repository.potholes
 
     // Current Tab
@@ -79,7 +113,7 @@ class RideVisionViewModel(
 
     private val _activeWarning = MutableStateFlow<HazardWarning?>(
         HazardWarning(
-            potholeId = "pothole-88219",
+            potholeId = "pothole-mng-001",
             distanceMeters = 300,
             angularDeviationDeg = 4.2f,
             severity = Severity.SEVERE,
@@ -168,6 +202,13 @@ class RideVisionViewModel(
     private val _isNavigating = MutableStateFlow(false)
     val isNavigating: StateFlow<Boolean> = _isNavigating.asStateFlow()
 
+    // Google Maps Grounding via Gemini 3.5 Flash
+    private val _routeMapsIntel = MutableStateFlow<Map<String, RouteGroundingIntel>>(emptyMap())
+    val routeMapsIntel: StateFlow<Map<String, RouteGroundingIntel>> = _routeMapsIntel.asStateFlow()
+
+    private val _isAnalyzingMaps = MutableStateFlow(false)
+    val isAnalyzingMaps: StateFlow<Boolean> = _isAnalyzingMaps.asStateFlow()
+
     // History & Registry Search / Filter State
     private val _historySearchQuery = MutableStateFlow("")
     val historySearchQuery: StateFlow<String> = _historySearchQuery.asStateFlow()
@@ -175,16 +216,55 @@ class RideVisionViewModel(
     private val _historyFilterTab = MutableStateFlow("all") // "all", "pending", "progress", "repaired"
     val historyFilterTab: StateFlow<String> = _historyFilterTab.asStateFlow()
 
-    // Profile State
-    private val _isLoginView = MutableStateFlow(false)
-    val isLoginView: StateFlow<Boolean> = _isLoginView.asStateFlow()
+    // User Profile synced from Firestore
+    private val defaultProfile = UserProfile(
+        displayName = "Road Sentinel",
+        safetyTier = "Gold Guardian",
+        verifiedCount = 1
+    )
 
-    private val _userProfile = MutableStateFlow(UserProfile())
-    val userProfile: StateFlow<UserProfile> = _userProfile.asStateFlow()
+    val userProfile: StateFlow<UserProfile> = combine(
+        _currentUser,
+        repository.currentUserProfile
+    ) { user, firestoreProfile ->
+        if (firestoreProfile != null) {
+            firestoreProfile
+        } else if (user != null) {
+            UserProfile(
+                userId = user.uid,
+                email = user.email.orEmpty(),
+                displayName = user.displayName ?: "Road Sentinel",
+                photoUrl = user.photoUrl?.toString().orEmpty(),
+                riderId = "#RV-${user.uid.take(6).uppercase()}",
+                safetyTier = "Gold Guardian",
+                verifiedCount = 1
+            )
+        } else {
+            defaultProfile
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultProfile)
 
     // Feedback Toast / Event Message
     private val _userFeedback = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val userFeedback: SharedFlow<String> = _userFeedback.asSharedFlow()
+
+    private fun syncFirebaseUserToProfile(user: FirebaseUser) {
+        viewModelScope.launch {
+            val existing = repository.currentUserProfile.value
+            if (existing == null) {
+                val newProfile = UserProfile(
+                    userId = user.uid,
+                    email = user.email.orEmpty(),
+                    displayName = user.displayName ?: "Road Sentinel",
+                    photoUrl = user.photoUrl?.toString().orEmpty(),
+                    riderId = "#RV-${user.uid.take(6).uppercase()}",
+                    safetyTier = "Gold Guardian",
+                    verifiedCount = 1
+                )
+                repository.saveUserProfile(newProfile)
+            }
+        }
+    }
 
     fun setTab(tab: AppTab) {
         _currentTab.value = tab
@@ -201,7 +281,6 @@ class RideVisionViewModel(
         _isRadarAudioEnabled.value = !_isRadarAudioEnabled.value
     }
 
-    // Photo / Optical Capture
     fun loadInitialSample(context: Context) {
         if (_currentBitmap.value == null) {
             val bmp = BitmapFactory.decodeResource(context.resources, R.drawable.sample_severe_pothole)
@@ -255,6 +334,9 @@ class RideVisionViewModel(
         }
     }
 
+    /**
+     * Real Firestore Pothole Submission.
+     */
     fun submitComplaint(notes: String = "") {
         viewModelScope.launch {
             val res = repository.submitReport(
@@ -262,10 +344,13 @@ class RideVisionViewModel(
                 lon = _currentLon.value,
                 address = _currentStreetAddress.value,
                 severity = Severity.SEVERE,
-                notes = notes.ifBlank { "Deep road fissure logged via RideVision optical HUD scanner." }
+                notes = notes.ifBlank { "Road cavity detected via optical AI telemetry." }
             )
             _submissionConfirmed.value = true
-            _userFeedback.emit("Report submitted and published.")
+            when (res) {
+                is ReportResult.Created -> _userFeedback.emit("Report logged to Cloud Firestore.")
+                is ReportResult.MergedExisting -> _userFeedback.emit("Merged with existing hazard (${res.distanceMeters}m away).")
+            }
         }
     }
 
@@ -284,12 +369,14 @@ class RideVisionViewModel(
 
     fun selectRoute(routeId: String) {
         _selectedRouteId.value = routeId
+        refreshRouteMapsIntel(routeId)
     }
 
     fun swapOriginDestination() {
         val orig = _routeOrigin.value
         _routeOrigin.value = _routeDestination.value
         _routeDestination.value = orig
+        refreshRouteMapsIntel(_selectedRouteId.value)
     }
 
     fun toggleNavigation() {
@@ -297,6 +384,28 @@ class RideVisionViewModel(
         _isNavigating.value = next
         viewModelScope.launch {
             _userFeedback.emit(if (next) "Cockpit HUD Live • Safe Navigation Started" else "Navigation Paused")
+        }
+    }
+
+    /**
+     * Executes Google Maps Grounding via Gemini 3.5 Flash for live route analysis.
+     */
+    fun refreshRouteMapsIntel(routeId: String) {
+        val selected = safeRouteOptions.firstOrNull { it.id == routeId } ?: safeRouteOptions.first()
+        _isAnalyzingMaps.value = true
+        viewModelScope.launch {
+            val intel = GeminiMapsGroundingService.analyzeRouteWithMaps(
+                routeId = selected.id,
+                routeName = selected.name,
+                origin = _routeOrigin.value,
+                destination = _routeDestination.value,
+                city = "Mangaluru"
+            )
+            val currentMap = _routeMapsIntel.value.toMutableMap()
+            currentMap[routeId] = intel
+            _routeMapsIntel.value = currentMap
+            _isAnalyzingMaps.value = false
+            _userFeedback.emit("Google Maps Intel: ${selected.name} refreshed")
         }
     }
 
@@ -310,35 +419,62 @@ class RideVisionViewModel(
     }
 
     fun upvoteHazard(potholeId: String) {
+        val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
-            when (val res = repository.confirmStillThere(potholeId)) {
-                is VoteResult.Success -> {
-                    _userFeedback.emit(res.message)
-                }
-                is VoteResult.CooldownActive -> {
-                    _userFeedback.emit(res.message)
-                }
+            when (val res = repository.confirmStillThere(potholeId, uid)) {
+                is VoteResult.Success -> _userFeedback.emit(res.message)
+                is VoteResult.CooldownActive -> _userFeedback.emit(res.message)
             }
         }
     }
 
-    // Profile Controls
-    fun setLoginView(isLogin: Boolean) {
-        _isLoginView.value = isLogin
+    fun confirmHazardFixed(potholeId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        viewModelScope.launch {
+            when (val res = repository.confirmFixed(potholeId, uid)) {
+                is VoteResult.Success -> _userFeedback.emit(res.message)
+                is VoteResult.CooldownActive -> _userFeedback.emit(res.message)
+            }
+        }
     }
 
+    // Profile & Auth Controls
     fun toggleEarbudAudio(enabled: Boolean) {
-        _userProfile.value = _userProfile.value.copy(earbudAudioPing = enabled)
+        val current = repository.currentUserProfile.value ?: return
+        viewModelScope.launch {
+            repository.saveUserProfile(current.copy(earbudAudioPing = enabled))
+            _userFeedback.emit(if (enabled) "Earbud Chime: Enabled" else "Earbud Chime: Muted")
+        }
     }
 
     fun toggleHandlebarHaptics(enabled: Boolean) {
-        _userProfile.value = _userProfile.value.copy(handlebarHapticPulse = enabled)
+        val current = repository.currentUserProfile.value ?: return
+        viewModelScope.launch {
+            repository.saveUserProfile(current.copy(handlebarHapticPulse = enabled))
+            _userFeedback.emit(if (enabled) "Handlebar Haptics: Enabled" else "Handlebar Haptics: Disabled")
+        }
     }
 
-    fun performLogin(username: String) {
-        _isLoginView.value = false
+    fun signOut() {
+        auth.signOut()
         viewModelScope.launch {
-            _userFeedback.emit("Authenticated as $username • Welcome back, Alex!")
+            _userFeedback.emit("Signed out of RideVision account.")
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        auth.removeAuthStateListener(authListener)
+        repository.cleanup()
+    }
+
+    companion object {
+        fun provideFactory(context: Context): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val dbId = context.applicationContext.getString(R.string.firestore_database_id)
+                val db = FirebaseFirestore.getInstance(dbId)
+                RideVisionViewModel(PotholeRepository(db))
+            }
         }
     }
 }

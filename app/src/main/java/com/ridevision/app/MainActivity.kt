@@ -19,7 +19,9 @@ import com.ridevision.app.ui.viewmodel.RideVisionViewModel
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: RideVisionViewModel by viewModels()
+    private val viewModel: RideVisionViewModel by viewModels {
+        RideVisionViewModel.provideFactory(this)
+    }
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     private val requestLocationPermissionLauncher = registerForActivityResult(
