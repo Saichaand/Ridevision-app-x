@@ -87,6 +87,15 @@ class RideVisionViewModel(
     // Live Cloud Firestore Potholes Stream
     val potholes: StateFlow<List<Pothole>> = repository.potholes
 
+    // Filtered stream containing ONLY potholes reported by the current logged-in user
+    val myReportedPotholes: StateFlow<List<Pothole>> = combine(
+        potholes,
+        currentUser
+    ) { list, user ->
+        val uid = user?.uid ?: ""
+        if (uid.isBlank()) emptyList() else list.filter { it.userId == uid }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // Current Tab
     private val _currentTab = MutableStateFlow(AppTab.REPORT)
     val currentTab: StateFlow<AppTab> = _currentTab.asStateFlow()
@@ -372,11 +381,42 @@ class RideVisionViewModel(
         refreshRouteMapsIntel(routeId)
     }
 
+    fun setRouteOrigin(origin: String) {
+        _routeOrigin.value = origin
+    }
+
+    fun setRouteDestination(dest: String) {
+        _routeDestination.value = dest
+    }
+
     fun swapOriginDestination() {
         val orig = _routeOrigin.value
         _routeOrigin.value = _routeDestination.value
         _routeDestination.value = orig
         refreshRouteMapsIntel(_selectedRouteId.value)
+    }
+
+    fun updateUserProfileVehicleDetails(
+        vehicleModel: String,
+        vehicleSpec: String,
+        residentialBase: String,
+        directLine: String,
+        emergencyIce: String
+    ) {
+        val user = auth.currentUser ?: return
+        val current = userProfile.value
+        val updated = current.copy(
+            userId = user.uid,
+            vehicleModel = vehicleModel.ifBlank { "Yamaha MT-07" },
+            vehicleSpec = vehicleSpec.ifBlank { "Commuter Bike" },
+            residentialBase = residentialBase.ifBlank { "Mangaluru Base" },
+            directLine = directLine.ifBlank { "+91 98450 12345" },
+            emergencyIce = emergencyIce.ifBlank { "Emergency Contact" }
+        )
+        viewModelScope.launch {
+            repository.saveUserProfile(updated)
+            _userFeedback.emit("Commuter Vehicle & Base details saved to Cloud Firestore.")
+        }
     }
 
     fun toggleNavigation() {

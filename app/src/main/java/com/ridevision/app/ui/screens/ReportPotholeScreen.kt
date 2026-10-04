@@ -425,31 +425,58 @@ fun ReportPotholeScreen(
                         }
                     }
 
-                    // Radiant Gold Take Picture Button
-                    Button(
-                        onClick = {
-                            takePictureLauncher.launch(null)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = RadiantGoldPrimary,
-                            contentColor = OnGoldPrimary
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
+                    // Camera & Gallery Image Selection Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Take Picture",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
+                        Button(
+                            onClick = { takePictureLauncher.launch(null) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = RadiantGoldPrimary,
+                                contentColor = OnGoldPrimary
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoCamera,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Take Picture",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        Button(
+                            onClick = { pickImageLauncher.launch("image/*") },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EmeraldSurfaceHigh,
+                                contentColor = RadiantGoldPrimary
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Gallery Pick",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

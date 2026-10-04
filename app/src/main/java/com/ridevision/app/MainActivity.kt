@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: RideVisionViewModel by viewModels {
         RideVisionViewModel.provideFactory(this)
     }
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var fusedLocationClient: FusedLocationProviderClient? = null
 
     private val requestLocationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
-            startLocationUpdates()
+            initializeLocationClientAndStartUpdates()
         }
     }
 
@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
             onError = { e -> android.util.Log.e("MainActivity", "Model init failed", e) }
         )
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        // Check and request runtime location permissions before initializing LocationServices client
         checkAndRequestLocationPermissions()
 
         setContent {
@@ -54,6 +54,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Checks and requests ACCESS_FINE_LOCATION and ACCESS_COARSE_LOCATION permissions
+     * at runtime before attempting to initialize the LocationServices client.
+     */
     private fun checkAndRequestLocationPermissions() {
         val hasFine = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
@@ -64,7 +68,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasFine || hasCoarse) {
-            startLocationUpdates()
+            initializeLocationClientAndStartUpdates()
         } else {
             requestLocationPermissionLauncher.launch(
                 arrayOf(
@@ -75,10 +79,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Safely initializes the FusedLocationProviderClient only after location permissions
+     * have been confirmed and starts retrieving location updates.
+     */
+    private fun initializeLocationClientAndStartUpdates() {
+        if (fusedLocationClient == null) {
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        }
+        startLocationUpdates()
+    }
+
     private fun startLocationUpdates() {
         try {
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                .addOnSuccessListener { loc ->
+            fusedLocationClient?.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                ?.addOnSuccessListener { loc ->
                     if (loc != null) {
                         val heading = if (loc.hasBearing()) loc.bearing else 45f
                         val speed = if (loc.hasSpeed()) loc.speed * 3.6f else 40f

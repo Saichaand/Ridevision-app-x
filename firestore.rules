@@ -56,7 +56,7 @@ service cloud.firestore {
 
     // Community Pothole & Road Hazard Registry
     match /potholes/{potholeId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAuthenticated() && isValidPothole();
       // Allow report owner to edit or any authenticated rider to confirm / verify repair
       allow update: if isAuthenticated() && (

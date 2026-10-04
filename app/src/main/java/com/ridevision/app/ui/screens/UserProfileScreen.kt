@@ -32,17 +32,25 @@ import androidx.compose.material.icons.filled.Sos
 import androidx.compose.material.icons.filled.TwoWheeler
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +69,7 @@ import com.ridevision.app.ui.theme.MintSecondary
 import com.ridevision.app.ui.theme.MintSecondaryContainer
 import com.ridevision.app.ui.theme.OnGoldPrimary
 import com.ridevision.app.ui.theme.OnMintSecondaryContainer
+import com.ridevision.app.ui.theme.OutlineColor
 import com.ridevision.app.ui.theme.RadiantGoldContainer
 import com.ridevision.app.ui.theme.RadiantGoldPrimary
 import com.ridevision.app.ui.theme.TextOnSurface
@@ -74,6 +83,13 @@ fun UserProfileScreen(
 ) {
     val profile by viewModel.userProfile.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+
+    var isEditingVehicle by remember { mutableStateOf(false) }
+    var vehicleModelInput by remember(profile.vehicleModel) { mutableStateOf(profile.vehicleModel) }
+    var vehicleSpecInput by remember(profile.vehicleSpec) { mutableStateOf(profile.vehicleSpec) }
+    var residentialBaseInput by remember(profile.residentialBase) { mutableStateOf(profile.residentialBase) }
+    var directLineInput by remember(profile.directLine) { mutableStateOf(profile.directLine) }
+    var emergencyIceInput by remember(profile.emergencyIce) { mutableStateOf(profile.emergencyIce) }
 
     Column(
         modifier = modifier
@@ -342,7 +358,7 @@ fun UserProfileScreen(
             }
         }
 
-        // 5. Commuter Specification & Base Card
+        // 5. Commuter Specification & Base Card (User Editable)
         Card(
             colors = CardDefaults.cardColors(containerColor = EmeraldSurface),
             shape = RoundedCornerShape(14.dp),
@@ -352,36 +368,178 @@ fun UserProfileScreen(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.TwoWheeler, contentDescription = null, tint = RadiantGoldPrimary, modifier = Modifier.size(18.dp))
-                    Text("COMMUTER VEHICLE & BASE", color = RadiantGoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
-                }
-
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Registered Ride", color = TextOnSurfaceVariant, fontSize = 13.sp)
-                    Text(profile.vehicleModel, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.TwoWheeler, contentDescription = null, tint = RadiantGoldPrimary, modifier = Modifier.size(18.dp))
+                        Text("COMMUTER VEHICLE & BASE", color = RadiantGoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(EmeraldSurfaceHigh)
+                            .clickable { isEditingVehicle = !isEditingVehicle }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isEditingVehicle) Icons.Default.Cancel else Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = RadiantGoldPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (isEditingVehicle) "Cancel" else "Edit Details",
+                            color = RadiantGoldPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Home Sector", color = TextOnSurfaceVariant, fontSize = 13.sp)
-                    Text(profile.residentialBase, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
+                if (!isEditingVehicle) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Registered Ride", color = TextOnSurfaceVariant, fontSize = 13.sp)
+                        Text(profile.vehicleModel, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Emergency Contact", color = TextOnSurfaceVariant, fontSize = 13.sp)
-                    Text(profile.emergencyIce, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Vehicle Specs", color = TextOnSurfaceVariant, fontSize = 13.sp)
+                        Text(profile.vehicleSpec, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Home Sector", color = TextOnSurfaceVariant, fontSize = 13.sp)
+                        Text(profile.residentialBase, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Direct Line", color = TextOnSurfaceVariant, fontSize = 13.sp)
+                        Text(profile.directLine, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Emergency ICE", color = TextOnSurfaceVariant, fontSize = 13.sp)
+                        Text(profile.emergencyIce, color = TextOnSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = vehicleModelInput,
+                        onValueChange = { vehicleModelInput = it },
+                        label = { Text("Registered Vehicle Model", color = TextOnSurfaceVariant, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RadiantGoldPrimary,
+                            unfocusedBorderColor = OutlineColor,
+                            focusedTextColor = TextOnSurface,
+                            unfocusedTextColor = TextOnSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = vehicleSpecInput,
+                        onValueChange = { vehicleSpecInput = it },
+                        label = { Text("Vehicle Class / Specification", color = TextOnSurfaceVariant, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RadiantGoldPrimary,
+                            unfocusedBorderColor = OutlineColor,
+                            focusedTextColor = TextOnSurface,
+                            unfocusedTextColor = TextOnSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = residentialBaseInput,
+                        onValueChange = { residentialBaseInput = it },
+                        label = { Text("Residential Base / Home Sector", color = TextOnSurfaceVariant, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RadiantGoldPrimary,
+                            unfocusedBorderColor = OutlineColor,
+                            focusedTextColor = TextOnSurface,
+                            unfocusedTextColor = TextOnSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = directLineInput,
+                        onValueChange = { directLineInput = it },
+                        label = { Text("Direct Mobile Line", color = TextOnSurfaceVariant, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RadiantGoldPrimary,
+                            unfocusedBorderColor = OutlineColor,
+                            focusedTextColor = TextOnSurface,
+                            unfocusedTextColor = TextOnSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = emergencyIceInput,
+                        onValueChange = { emergencyIceInput = it },
+                        label = { Text("Emergency Contact (ICE)", color = TextOnSurfaceVariant, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RadiantGoldPrimary,
+                            unfocusedBorderColor = OutlineColor,
+                            focusedTextColor = TextOnSurface,
+                            unfocusedTextColor = TextOnSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            viewModel.updateUserProfileVehicleDetails(
+                                vehicleModel = vehicleModelInput,
+                                vehicleSpec = vehicleSpecInput,
+                                residentialBase = residentialBaseInput,
+                                directLine = directLineInput,
+                                emergencyIce = emergencyIceInput
+                            )
+                            isEditingVehicle = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RadiantGoldPrimary,
+                            contentColor = OnGoldPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Vehicle & Base Details", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

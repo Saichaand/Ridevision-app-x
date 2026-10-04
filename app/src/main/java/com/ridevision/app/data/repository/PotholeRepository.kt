@@ -78,7 +78,7 @@ class PotholeRepository(private val db: FirebaseFirestore) {
         val collectionRef = db.collection("potholes")
         potholesListener = collectionRef.addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e(TAG, "Error listening to Firestore /potholes: ${error.message}", error)
+                Log.w(TAG, "Firestore /potholes listener notification: ${error.message}")
                 return@addSnapshotListener
             }
 
@@ -373,10 +373,11 @@ class PotholeRepository(private val db: FirebaseFirestore) {
      * Listens to the authenticated user's profile at /users/{userId}.
      */
     fun startListeningToUserProfile(userId: String) {
+        if (userId.isBlank()) return
         userProfileListener?.remove()
         userProfileListener = db.collection("users").document(userId).addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e(TAG, "Error listening to user profile: ${error.message}", error)
+                Log.w(TAG, "User profile listener notification: ${error.message}")
                 return@addSnapshotListener
             }
 
@@ -391,7 +392,12 @@ class PotholeRepository(private val db: FirebaseFirestore) {
                     milesCovered = snapshot.getString("milesCovered") ?: "12.4 km",
                     precisionScore = snapshot.getString("precisionScore") ?: "99.4%",
                     vehicleModel = snapshot.getString("vehicleModel") ?: "Yamaha MT-07",
+                    vehicleSpec = snapshot.getString("vehicleSpec") ?: "Daily Commuter • Class: Roadster 689cc",
+                    residentialBase = snapshot.getString("residentialBase") ?: "Kadri Hills, Mangaluru, Karnataka",
+                    directLine = snapshot.getString("directLine") ?: "+91 98450 12345",
                     emergencyIce = snapshot.getString("emergencyIce") ?: "Priya Vance (+91 98450 88219)",
+                    earbudAudioPing = snapshot.getBoolean("earbudAudioPing") ?: true,
+                    handlebarHapticPulse = snapshot.getBoolean("handlebarHapticPulse") ?: true,
                     createdAt = snapshot.getTimestamp("createdAt"),
                     updatedAt = snapshot.getTimestamp("updatedAt")
                 )

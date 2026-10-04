@@ -90,7 +90,7 @@ fun ComplaintHistoryScreen(
     viewModel: RideVisionViewModel,
     modifier: Modifier = Modifier
 ) {
-    val potholes by viewModel.potholes.collectAsState()
+    val potholes by viewModel.myReportedPotholes.collectAsState()
     val activeTab by viewModel.historyFilterTab.collectAsState()
     val searchQuery by viewModel.historySearchQuery.collectAsState()
 
@@ -303,6 +303,60 @@ fun ComplaintHistoryScreen(
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                         )
+                    }
+                }
+            }
+        }
+
+        // Empty state when user has no reports
+        if (filteredList.isEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = EmeraldSurface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(24.dp).fillMaxWidth()
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(EmeraldSurfaceHighest)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ReportProblem,
+                                contentDescription = null,
+                                tint = RadiantGoldPrimary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Text(
+                            text = "No Reported Hazards Found",
+                            color = TextOnSurface,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Only pothole complaints reported under your authenticated account appear here. Use the Camera / Report tab to scan and publish road hazards.",
+                            color = TextOnSurfaceVariant,
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Button(
+                            onClick = { viewModel.setTab(AppTab.REPORT) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = RadiantGoldPrimary,
+                                contentColor = OnGoldPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Report First Hazard", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

@@ -47,6 +47,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -243,51 +245,75 @@ fun SafeRouteScreen(
                             Spacer(modifier = Modifier.width(10.dp))
 
                             // Start & Destination Inputs
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                // Start Row
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(EmeraldSurface.copy(alpha = 0.8f))
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("START", color = MintSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                        Text(origin, color = TextOnSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MintSecondaryContainer)
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("GPS", color = MintSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Start / Origin Field
+                                OutlinedTextField(
+                                    value = origin,
+                                    onValueChange = { viewModel.setRouteOrigin(it) },
+                                    label = { Text("START LOCATION", color = MintSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(MintSecondaryContainer)
+                                                .clickable { viewModel.detectGps(context) }
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("GPS", color = MintSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MintSecondary,
+                                        unfocusedBorderColor = OutlineColor,
+                                        focusedTextColor = TextOnSurface,
+                                        unfocusedTextColor = TextOnSurface,
+                                        focusedContainerColor = EmeraldSurface,
+                                        unfocusedContainerColor = EmeraldSurface
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
 
-                                // Dest Row
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(EmeraldSurface.copy(alpha = 0.8f))
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                // Destination Field
+                                OutlinedTextField(
+                                    value = destination,
+                                    onValueChange = { viewModel.setRouteDestination(it) },
+                                    label = { Text("DESTINATION", color = RadiantGoldPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.PinDrop,
+                                            contentDescription = null,
+                                            tint = RadiantGoldPrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = RadiantGoldPrimary,
+                                        unfocusedBorderColor = OutlineColor,
+                                        focusedTextColor = TextOnSurface,
+                                        unfocusedTextColor = TextOnSurface,
+                                        focusedContainerColor = EmeraldSurface,
+                                        unfocusedContainerColor = EmeraldSurface
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                // Calculate Route Button
+                                Button(
+                                    onClick = { viewModel.refreshRouteMapsIntel(selectedRouteId) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = RadiantGoldPrimary,
+                                        contentColor = OnGoldPrimary
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(42.dp)
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("DEST", color = RadiantGoldPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                        Text(destination, color = TextOnSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    Icon(
-                                        imageVector = Icons.Default.PinDrop,
-                                        contentDescription = null,
-                                        tint = RadiantGoldPrimary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
+                                    Icon(Icons.Default.AltRoute, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Analyze & Calculate Route", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 

@@ -153,7 +153,12 @@ data class UserProfile(
             "milesCovered" to milesCovered,
             "precisionScore" to precisionScore,
             "vehicleModel" to vehicleModel,
+            "vehicleSpec" to vehicleSpec,
+            "residentialBase" to residentialBase,
+            "directLine" to directLine,
             "emergencyIce" to emergencyIce,
+            "earbudAudioPing" to earbudAudioPing,
+            "handlebarHapticPulse" to handlebarHapticPulse,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         if (createdAt == null) {

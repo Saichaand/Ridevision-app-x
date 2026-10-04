@@ -47,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.Credential
 import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
@@ -66,9 +68,35 @@ import com.ridevision.app.ui.theme.OnGoldPrimary
 import com.ridevision.app.ui.theme.RadiantGoldPrimary
 import com.ridevision.app.ui.theme.TextOnSurface
 import com.ridevision.app.ui.theme.TextOnSurfaceVariant
+import android.content.Context
+import android.content.ContextWrapper
 import kotlinx.coroutines.launch
 
 private const val TAG = "AuthScreen"
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+private fun extractIdToken(credential: Credential): String? {
+    if (credential is GoogleIdTokenCredential) {
+        return credential.idToken
+    }
+    if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+        return try {
+            GoogleIdTokenCredential.createFrom(credential.data).idToken
+        } catch (e: Exception) {
+            Log.e("AuthScreen", "Failed to parse GoogleIdTokenCredential from CustomCredential bundle", e)
+            null
+        }
+    }
+    return null
+}
 
 @Composable
 fun AuthScreen(
@@ -97,14 +125,14 @@ fun AuthScreen(
                     .addCredentialOption(signInWithGoogleOption)
                     .build()
 
+                val targetContext = context.findActivity() ?: context
                 val result = credentialManager.getCredential(
-                    context = context,
+                    context = targetContext,
                     request = request
                 )
 
-                val credential = result.credential
-                if (credential is GoogleIdTokenCredential) {
-                    val idToken = credential.idToken
+                val idToken = extractIdToken(result.credential)
+                if (idToken != null) {
                     val firebaseCred = GoogleAuthProvider.getCredential(idToken, null)
                     auth.signInWithCredential(firebaseCred)
                         .addOnSuccessListener {
@@ -118,7 +146,7 @@ fun AuthScreen(
                         }
                 } else {
                     isLoading = false
-                    errorMessage = "Unexpected credential format returned."
+                    errorMessage = "Unable to process Google ID Token (${result.credential.type})."
                 }
             } catch (e: GetCredentialCancellationException) {
                 Log.i(TAG, "Google Sign-In canceled by user")
@@ -126,11 +154,25 @@ fun AuthScreen(
             } catch (e: GetCredentialException) {
                 Log.e(TAG, "Credential Manager error: ${e.message}", e)
                 isLoading = false
-                errorMessage = "Google Sign-in failed: ${e.localizedMessage ?: "Unknown error"}"
+                val rawMsg = e.message.orEmpty()
+                errorMessage = when {
+                    rawMsg.contains("16") || rawMsg.contains("No matching credentials", ignoreCase = true) || rawMsg.contains("No credentials", ignoreCase = true) -> {
+                        "No Google Account found on this device/emulator. Please add or sign in to a Google account in Android Settings → Passwords & Accounts to proceed."
+                    }
+                    rawMsg.contains("10") || rawMsg.contains("DEVELOPER_ERROR", ignoreCase = true) -> {
+                        "OAuth configuration error (code 10). Verify that the package name and debug keystore SHA-1 are registered in Google Cloud / Firebase Console."
+                    }
+                    rawMsg.contains("7") || rawMsg.contains("NETWORK_ERROR", ignoreCase = true) -> {
+                        "Network error connecting to Google servers. Please check your internet connection."
+                    }
+                    else -> {
+                        "Google Sign-in failed: ${e.localizedMessage ?: e.message ?: "Unknown error"}"
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Sign-in exception: ${e.message}", e)
                 isLoading = false
-                errorMessage = e.localizedMessage ?: "Sign-in failed."
+                errorMessage = e.localizedMessage ?: e.message ?: "Sign-in failed."
             }
         }
     }
