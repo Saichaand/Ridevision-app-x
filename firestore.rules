@@ -2,6 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -10,58 +15,70 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isValidUser() {
-      let data = request.resource.data;
-      return data.userId is string &&
-             data.userId == request.auth.uid &&
-             data.email is string &&
-             data.displayName is string &&
-             data.safetyTier is string &&
-             data.verifiedCount is int &&
-             (!('photoUrl' in data) || data.photoUrl is string) &&
-             (!('milesCovered' in data) || data.milesCovered is string) &&
-             (!('vehicleModel' in data) || data.vehicleModel is string) &&
-             (!('createdAt' in data) || data.createdAt is timestamp) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function isValidPothole() {
-      let data = request.resource.data;
-      return data.id is string &&
-             data.userId is string &&
-             data.userId == request.auth.uid &&
+    function isValidUser(data) {
+      return data.userId is string &&
+             data.email is string && data.email.size() <= 200 &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.safetyTier is string && data.safetyTier.size() <= 50 &&
+             data.verifiedCount is int && data.verifiedCount >= 0 &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2000)) &&
+             (!('milesCovered' in data) || (data.milesCovered is string && data.milesCovered.size() <= 50)) &&
+             (!('vehicleModel' in data) || (data.vehicleModel is string && data.vehicleModel.size() <= 100)) &&
+             (!('vehicleSpec' in data) || (data.vehicleSpec is string && data.vehicleSpec.size() <= 150)) &&
+             (!('residentialBase' in data) || (data.residentialBase is string && data.residentialBase.size() <= 200)) &&
+             (!('directLine' in data) || (data.directLine is string && data.directLine.size() <= 50)) &&
+             (!('emergencyIce' in data) || (data.emergencyIce is string && data.emergencyIce.size() <= 200)) &&
+             (!('earbudAudioPing' in data) || data.earbudAudioPing is bool) &&
+             (!('handlebarHapticPulse' in data) || data.handlebarHapticPulse is bool);
+    }
+
+    function isValidPothole(data) {
+      return data.id is string && isValidId(data.id) &&
+             data.userId is string && data.userId.size() <= 128 &&
              (data.lat is float || data.lat is int) &&
              (data.lon is float || data.lon is int) &&
-             data.address is string &&
+             data.address is string && data.address.size() <= 300 &&
              data.severity in ['MINOR', 'MODERATE', 'SEVERE'] &&
              data.status in ['ACTIVE', 'IN_PROGRESS', 'VERIFIED_FIXED'] &&
-             (!('ticketNumber' in data) || data.ticketNumber is string) &&
-             (!('city' in data) || data.city is string) &&
-             (!('laneInfo' in data) || data.laneInfo is string) &&
-             (!('confirmationCount' in data) || data.confirmationCount is int) &&
-             (!('fixedConfirmationCount' in data) || data.fixedConfirmationCount is int) &&
-             (!('notes' in data) || data.notes is string) &&
+             (!('ticketNumber' in data) || (data.ticketNumber is string && data.ticketNumber.size() <= 50)) &&
+             (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+             (!('laneInfo' in data) || (data.laneInfo is string && data.laneInfo.size() <= 100)) &&
+             (!('confirmationCount' in data) || (data.confirmationCount is int && data.confirmationCount >= 0)) &&
+             (!('fixedConfirmationCount' in data) || (data.fixedConfirmationCount is int && data.fixedConfirmationCount >= 0)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000000)) &&
              (!('depthCm' in data) || data.depthCm is float || data.depthCm is int) &&
              (!('widthCm' in data) || data.widthCm is float || data.widthCm is int) &&
-             (!('createdAt' in data) || data.createdAt is timestamp) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
+             (!('distanceDisplay' in data) || (data.distanceDisplay is string && data.distanceDisplay.size() <= 50)) &&
+             (!('statusNote' in data) || (data.statusNote is string && data.statusNote.size() <= 200)) &&
+             (!('reportedAt' in data) || (data.reportedAt is string && data.reportedAt.size() <= 100));
+    }
+
+    // Validation connection probe
+    match /test/{docId} {
+      allow read: if true;
     }
 
     // User Profile Documents
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(userId) && isValidUser();
+      allow read: if true;
+      allow create, update: if isValidUser(request.resource.data);
       allow delete: if false;
     }
 
     // Community Pothole & Road Hazard Registry
     match /potholes/{potholeId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidPothole();
-      // Allow report owner to edit or any authenticated rider to confirm / verify repair
-      allow update: if isAuthenticated() && (
-        (resource.data.userId == request.auth.uid) ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmationCount', 'fixedConfirmationCount', 'status', 'statusNote', 'updatedAt'])
+      allow create: if isValidPothole(request.resource.data);
+      // Allow community confirmation votes (+1 Still There, repair status) or report owner edits
+      allow update: if (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmationCount', 'fixedConfirmationCount', 'status', 'statusNote', 'updatedAtDisplay', 'updatedAt'])
+      ) || (
+        isAuthenticated() && resource.data.userId == request.auth.uid && isValidPothole(request.resource.data)
       );
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }

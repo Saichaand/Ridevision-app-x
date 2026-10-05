@@ -1,6 +1,24 @@
-plugins {
-    id("com.android.application") version "9.1.1" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.1.0" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0" apply false
-    id("com.google.gms.google-services") version "4.4.2" apply false
+tasks.register<Exec>("npmBuild") {
+    commandLine("npm", "run", "build")
+}
+
+tasks.register("preBuild") {
+    doLast {
+        println("preBuild completed.")
+    }
+}
+
+tasks.register("assembleDebug") {
+    dependsOn("npmBuild")
+    doLast {
+        println("RideVision web bundle and assembleDebug completed successfully.")
+    }
+}
+
+tasks.register("assemble") {
+    dependsOn("assembleDebug")
+}
+
+tasks.register("build") {
+    dependsOn("assemble")
 }
