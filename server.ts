@@ -29,13 +29,13 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Geocoding helper with landmark suffix fallback
+// Geocoding helper supporting any place in India
 async function geocodeLocation(rawQuery: string): Promise<{
   lat: number;
   lon: number;
   name: string;
   state: string;
-  isKarnataka: boolean;
+  isIndia: boolean;
   displayName: string;
 } | null> {
   const cleanQ = rawQuery.trim();
@@ -43,17 +43,17 @@ async function geocodeLocation(rawQuery: string): Promise<{
 
   // If query contains landmark words like Circle, Gate, etc., add cleaned variant
   const simplified = cleanQ
-    .replace(/\s+(circle|gate|junction|bypass|cross|bus stand|bus stop|corner|terminal)\b/gi, '')
+    .replace(/\s+(circle|gate|junction|bypass|cross|bus stand|bus stop|corner|terminal|station|chowk)\b/gi, '')
     .trim();
   if (simplified && simplified !== cleanQ) {
     queriesToTry.push(simplified);
   }
 
-  // Also try comma-separated parts if present (e.g. "Kankanady, Mangaluru")
+  // Also try comma-separated parts if present (e.g. "Connaught Place, New Delhi")
   const parts = cleanQ.split(',').map(p => p.trim()).filter(Boolean);
   if (parts.length > 1) {
     const simplifiedParts = parts
-      .map(p => p.replace(/\s+(circle|gate|junction|bypass|cross)\b/gi, '').trim())
+      .map(p => p.replace(/\s+(circle|gate|junction|bypass|cross|chowk)\b/gi, '').trim())
       .join(', ');
     if (simplifiedParts && !queriesToTry.includes(simplifiedParts)) {
       queriesToTry.push(simplifiedParts);
@@ -64,7 +64,7 @@ async function geocodeLocation(rawQuery: string): Promise<{
     try {
       const geoUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&countrycodes=in&limit=1`;
       const geoRes = await fetch(geoUrl, {
-        headers: { 'User-Agent': 'RideVision-Karnataka-RoadApp/1.0' }
+        headers: { 'User-Agent': 'RideVision-India-RoadApp/1.0' }
       });
       if (!geoRes.ok) continue;
       const data = await geoRes.json();
@@ -73,17 +73,15 @@ async function geocodeLocation(rawQuery: string): Promise<{
         const lat = parseFloat(item.lat);
         const lon = parseFloat(item.lon);
         const state = item.address?.state || '';
-        const stateClean = state.trim().toLowerCase();
-        const isKarnataka = stateClean
-          ? stateClean === 'karnataka'
-          : (lat >= 11.8 && lat <= 18.5 && lon >= 74.1 && lon <= 78.5);
+
+        const isIndia = lat >= 6.0 && lat <= 37.5 && lon >= 68.0 && lon <= 97.5;
 
         return {
           lat,
           lon,
           name: item.name || cleanQ,
           state,
-          isKarnataka,
+          isIndia,
           displayName: item.display_name
         };
       }
@@ -95,7 +93,7 @@ async function geocodeLocation(rawQuery: string): Promise<{
   return null;
 }
 
-// Real Geocoding API with Karnataka Geographic Validation
+// Real Geocoding API supporting all India
 app.get('/api/geocode', async (req, res) => {
   const query = (req.query.q as string || '').trim();
   if (!query) {
@@ -104,7 +102,7 @@ app.get('/api/geocode', async (req, res) => {
 
   const result = await geocodeLocation(query);
   if (!result) {
-    return res.status(404).json({ error: `Location not found: "${query}"` });
+    return res.status(404).json({ error: `Location not found in India: "${query}"` });
   }
 
   return res.json(result);
@@ -121,7 +119,7 @@ function haversineDistanceM(lat1: number, lon1: number, lat2: number, lon2: numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Real Routing Calculation API with Karnataka Geographic Validation
+// Real Routing Calculation API supporting all of India
 app.post('/api/route-calculate', async (req, res) => {
   const {
     originQuery,
@@ -146,54 +144,37 @@ app.post('/api/route-calculate', async (req, res) => {
   let originLat = rawOriginLat;
   let originLon = rawOriginLon;
   let originName = originQuery || 'Current GPS';
-  let originState = 'Karnataka';
-  let originIsKarnataka = true;
+  let originState = 'India';
 
   if (originLat === undefined || originLon === undefined) {
     const geo = await geocodeLocation(originQuery);
     if (!geo) {
-      return res.status(404).json({ error: `Origin location not found: "${originQuery}"` });
+      return res.status(404).json({ error: `Origin location not found in India: "${originQuery}"` });
     }
     originLat = geo.lat;
     originLon = geo.lon;
     originName = geo.name;
-    originState = geo.state;
-    originIsKarnataka = geo.isKarnataka;
+    originState = geo.state || 'India';
   }
 
   // 2. Geocode Destination if coordinates missing
   let destLat = rawDestLat;
   let destLon = rawDestLon;
   let destName = destQuery;
-  let destState = 'Karnataka';
-  let destIsKarnataka = true;
+  let destState = 'India';
 
   if (destLat === undefined || destLon === undefined) {
     const geo = await geocodeLocation(destQuery);
     if (!geo) {
-      return res.status(404).json({ error: `Destination location not found: "${destQuery}"` });
+      return res.status(404).json({ error: `Destination location not found in India: "${destQuery}"` });
     }
     destLat = geo.lat;
     destLon = geo.lon;
     destName = geo.name;
-    destState = geo.state;
-    destIsKarnataka = geo.isKarnataka;
+    destState = geo.state || 'India';
   }
 
-  // 3. Karnataka Geographic Validation
-  if (!destIsKarnataka) {
-    return res.status(422).json({
-      error: `RideVision currently supports Karnataka roads only. Destination "${destName}" is located in ${destState || 'another state'}.`,
-      isKarnatakaOnlyError: true
-    });
-  }
-
-  const isCrossBorder = !originIsKarnataka && destIsKarnataka;
-  const borderNote = isCrossBorder
-    ? `Outside Karnataka (${originState}): Not analyzed by RideVision • Karnataka section: Analyzed by RideVision`
-    : null;
-
-  // 4. Real Multi-Route Retrieval with Route Geometric Similarity Check
+  // 3. Real Multi-Route Retrieval with Route Geometric Similarity Check
   function routeGeometricSimilarity(c1: [number, number][], c2: [number, number][]): number {
     if (!c1.length || !c2.length) return 1.0;
     const sampleCount = Math.min(40, c1.length);
@@ -513,6 +494,12 @@ app.post('/api/route-calculate', async (req, res) => {
     }
   }
 
+  // Calculate India state & interstate info
+  const originIsKarnataka = originState.toLowerCase().includes('karnataka');
+  const destIsKarnataka = destState.toLowerCase().includes('karnataka');
+  const isCrossBorder = originState !== destState && originState !== 'India' && destState !== 'India';
+  const borderNote = isCrossBorder ? `Interstate route between ${originState} and ${destState}.` : null;
+
   const hasMultipleRoutes = processedRoutes.length > 1;
   const alternativesNote = !hasMultipleRoutes
     ? 'No additional alternative route available.'
@@ -532,7 +519,7 @@ app.post('/api/route-calculate', async (req, res) => {
     hasMultipleRoutes,
     alternativesNote,
     avoidHolesNotice,
-    source: 'OpenStreetMap Routing Engine & Karnataka Civic Registry'
+    source: 'OpenStreetMap Routing Engine & India Road Registry'
   });
 });
 

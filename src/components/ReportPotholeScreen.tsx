@@ -40,6 +40,10 @@ export const ReportPotholeScreen: React.FC = () => {
   } = useRideVision();
 
   const [notes, setNotes] = useState('');
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -48,6 +52,55 @@ export const ReportPotholeScreen: React.FC = () => {
     day: '2-digit',
     year: 'numeric'
   }) + ' • ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const stopCameraStream = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const startCamera = async (facing: 'environment' | 'user' = 'environment') => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // Fall back to native file input
+        cameraInputRef.current?.click();
+        return;
+      }
+      stopCameraStream();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      mediaStreamRef.current = stream;
+      setIsCameraActive(true);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Camera access error / fallback to file picker:', err);
+      // Seamless fallback to file picker on browser block / permission decline
+      cameraInputRef.current?.click();
+    }
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        setCustomImage(dataUrl);
+      }
+    }
+    stopCameraStream();
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,6 +113,7 @@ export const ReportPotholeScreen: React.FC = () => {
       };
       reader.readAsDataURL(file);
     }
+    e.target.value = '';
   };
 
   const handleSubmit = async () => {
@@ -224,7 +278,6 @@ export const ReportPotholeScreen: React.FC = () => {
           <input
             type="file"
             accept="image/*"
-            capture="environment"
             ref={cameraInputRef}
             onChange={handleFileUpload}
             className="hidden"
@@ -239,7 +292,7 @@ export const ReportPotholeScreen: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-2.5">
             <button
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => startCamera(facingMode)}
               className="flex items-center justify-center gap-2 h-11 rounded-xl bg-[#FFD56D] text-[#3E2E00] font-extrabold text-xs shadow-md hover:bg-[#EEC14A] active:scale-[0.98] transition-all"
             >
               <Camera className="w-4 h-4" />
@@ -256,6 +309,78 @@ export const ReportPotholeScreen: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Interactive Live Camera Viewfinder Modal Overlay */}
+      {isCameraActive && (
+        <div className="fixed inset-0 z-50 bg-[#001208]/95 backdrop-blur-md flex flex-col items-center justify-between p-4 animate-in fade-in">
+          {/* Top Bar */}
+          <div className="w-full max-w-md flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[#FFD56D]">
+              <Camera className="w-5 h-5 animate-pulse" />
+              <span className="text-xs font-black tracking-widest uppercase">Live Camera Viewfinder</span>
+            </div>
+            <button
+              onClick={stopCameraStream}
+              className="w-8 h-8 rounded-full bg-[#162F22] border border-[#FFD56D]/30 flex items-center justify-center text-[#FFD56D] hover:bg-[#213A2C]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Video Preview with Reticle */}
+          <div className="relative w-full max-w-md aspect-[4/3] rounded-2xl overflow-hidden bg-black border-2 border-[#FFD56D]/40 shadow-2xl flex items-center justify-center">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            {/* Tactical Reticle Overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
+              <div className="w-64 h-40 rounded-xl border-2 border-dashed border-[#FFD56D] bg-[#FFD56D]/10 backdrop-blur-[1px] flex flex-col justify-between p-3">
+                <div className="text-[10px] font-mono font-bold text-[#FFD56D] uppercase tracking-widest">
+                  ALIGN ROAD SURFACE & POTHOLE HERE
+                </div>
+                <div className="text-[9px] font-mono text-white/80 self-end">
+                  LIVE OPTICAL TELEMETRY
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="w-full max-w-md flex items-center justify-around pb-6">
+            <button
+              onClick={() => {
+                const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+                setFacingMode(nextFacing);
+                startCamera(nextFacing);
+              }}
+              className="px-3 py-2 rounded-xl bg-[#162F22] border border-[#FFD56D]/30 text-[#FFD56D] text-xs font-bold"
+            >
+              Flip Camera
+            </button>
+
+            <button
+              onClick={capturePhoto}
+              className="w-16 h-16 rounded-full bg-[#FFD56D] border-4 border-[#3E2E00] flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all"
+              title="Capture Photo"
+            >
+              <div className="w-12 h-12 rounded-full border-2 border-[#3E2E00] flex items-center justify-center">
+                <Camera className="w-6 h-6 text-[#3E2E00]" />
+              </div>
+            </button>
+
+            <button
+              onClick={stopCameraStream}
+              className="px-3 py-2 rounded-xl bg-[#162F22] border border-[#FFD56D]/30 text-[#FF5252] text-xs font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 3. Geolocation Field Card */}
       <div className="rounded-2xl bg-[#0B2418] border border-[#162F22] p-3.5 space-y-2.5 shadow-lg">

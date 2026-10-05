@@ -72,7 +72,9 @@ export class GeoMatchingService {
     if (lat >= 12.80 && lat <= 13.20 && lon >= 77.40 && lon <= 77.85) return 'Bengaluru';
     if (lat >= 13.20 && lat <= 13.50 && lon >= 74.65 && lon <= 74.90) return 'Udupi';
     if (lat >= 12.20 && lat <= 12.45 && lon >= 76.50 && lon <= 76.80) return 'Mysuru';
-    return 'Mangaluru';
+    if (lat >= 18.80 && lat <= 19.30 && lon >= 72.75 && lon <= 73.15) return 'Mumbai';
+    if (lat >= 28.40 && lat <= 28.88 && lon >= 76.85 && lon <= 77.40) return 'Delhi';
+    return 'Municipal Works Division';
   }
 
   static checkWarningAhead(
@@ -144,7 +146,13 @@ export class GeoMatchingService {
     severity: Severity,
     notes: string = ''
   ): MunicipalDispatch {
-    const config = CITY_CONFIGS[city] || CITY_CONFIGS['Mangaluru'];
+    const config = CITY_CONFIGS[city] || {
+      cityName: city,
+      authorityName: `${city} Road Works Authority`,
+      channelType: 'helpline',
+      contactValue: '1077',
+      instructions: `Direct dispatch to ${city} Local Municipal Road Works Grievance Desk.`
+    };
     const message = this.buildComplaintText(address, lat, lon, severity, notes);
     const encodedMsg = encodeURIComponent(message);
 

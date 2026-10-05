@@ -563,7 +563,7 @@ export const SafeRouteScreen: React.FC = () => {
                   ))}
                 </div>
                 <div className="text-[10px] text-[#D1C5AF]/70 pt-1 border-t border-[#162F22]">
-                  {currentIntel.sourceLabel || 'Source: OpenStreetMap Routing Engine & Karnataka Civic Registry'}
+                  {currentIntel.sourceLabel || 'Source: OpenStreetMap Routing Engine & India Road Registry'}
                 </div>
               </div>
             )}
@@ -652,8 +652,16 @@ export const SafeRouteScreen: React.FC = () => {
             </div>
           </>
         ) : (
-          <div className="text-center py-6 text-xs text-[#D1C5AF]">
-            {routingError || 'Enter origin and destination within Karnataka to calculate safe routing.'}
+          <div className="text-center py-8 px-4 rounded-xl bg-[#0B2418] border border-[#162F22] space-y-2">
+            <div className="w-10 h-10 rounded-full bg-[#162F22] text-[#FFD56D] flex items-center justify-center mx-auto">
+              <Navigation className="w-5 h-5" />
+            </div>
+            <div className="text-xs font-bold text-[#CDE9D6]">
+              {routingError || 'Enter start location and destination above to calculate safe route options across India.'}
+            </div>
+            <div className="text-[11px] text-[#D1C5AF]">
+              Routes evaluate live OpenStreetMap corridors and verified hazard telemetry across Indian roads.
+            </div>
           </div>
         )}
 

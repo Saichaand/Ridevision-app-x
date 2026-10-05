@@ -30,14 +30,6 @@ export const HeaderBar: React.FC = () => {
 
         {/* Right status badges */}
         <div className="flex items-center gap-2">
-          {/* Live Scan pill */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#162F22]/80 border border-[#FFD56D]/30">
-            <Gauge className="w-3.5 h-3.5 text-[#FFD56D]" />
-            <span className="text-[10px] font-extrabold text-[#FFD56D] tracking-wider">
-              LIVE SCAN
-            </span>
-          </div>
-
           {/* Profile Avatar button */}
           <button
             onClick={() => setTab('PROFILE')}

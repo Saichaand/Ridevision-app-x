@@ -149,8 +149,8 @@ export const RideVisionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
   const [transportMode, setTransportMode] = useState<TransportMode>('RIDE');
   const [avoidHoles, setAvoidHoles] = useState<boolean>(true);
-  const [routeOrigin, setRouteOrigin] = useState<string>('Vamanjoor, Mangaluru');
-  const [routeDestination, setRouteDestination] = useState<string>('Kankanady Circle, Mangaluru');
+  const [routeOrigin, setRouteOrigin] = useState<string>('');
+  const [routeDestination, setRouteDestination] = useState<string>('');
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const [routingError, setRoutingError] = useState<string | null>(null);
   const [crossBorderNotice, setCrossBorderNotice] = useState<string | null>(null);
@@ -431,14 +431,8 @@ export const RideVisionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [routeOrigin, routeDestination, transportMode, avoidHoles, potholes, gpsStatus, currentLat, currentLon, showToast]
   );
 
-  // Trigger initial route calculation on load once hazards or default endpoints ready
+  // Safe route is calculated on user demand when origin & destination are provided
   const initialCalculatedRef = useRef(false);
-  useEffect(() => {
-    if (!initialCalculatedRef.current) {
-      initialCalculatedRef.current = true;
-      calculateRealRoute('Vamanjoor, Mangaluru', 'Kankanady Circle, Mangaluru');
-    }
-  }, [calculateRealRoute]);
 
   // Real Image AI Detection
   const runDetectionOnUrl = useCallback(async (url: string, isClean = false) => {
